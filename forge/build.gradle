@@ -2,25 +2,21 @@ plugins {
 	id 'eclipse'
 	id 'idea'
 	id 'maven-publish'
-	id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+	id 'net.minecraftforge.gradle' version '[6.0.24,6.2)'
 	id 'org.spongepowered.mixin' version '0.7.+'
 }
 
-// Load the common property
-Properties props = new Properties();
-props.load(new FileInputStream("$project.rootDir/../fabric/gradle.properties"));
-props.each {prop -> project.ext.set(prop.key, prop.value)};
+apply from: '../common.gradle'
 
 project.ext.mod_id = project.archives_base_name;
-project.ext.minecraft_version_range = '[' + project.minecraft_version_min + ', ' + project.minecraft_version_max + ')';
 
-// These are defined in ../fabric/gradle.properties
+// These are defined in ../common.properties
 version = project.mod_version
 group = project.dev_group // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = project.archives_base_name
 
-// Mojang ships Java 17 to end users in 1.18+
-java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+// Mojang ships Java 21 to end users in 1.20.5+, so your mod should target Java 21.
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
 minecraft {
@@ -73,13 +69,6 @@ minecraft {
             property 'forge.enabledGameTestNamespaces', mod_id
             args '--nogui'
         }
-
-        data {
-            workingDirectory project.file('run-data')
-
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
-            args '--mod', mod_id, '--all', '--output', file('../src/generated/resources/'), '--existing', file('../src/main/resources/'), '--existing', file('src/main/resources/')
-        }
     }
 }
 
@@ -123,8 +112,18 @@ dependencies {
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 
+    // Added according to https://forums.minecraftforge.net/topic/149009-error-on-launch/
+    // Hack fix for now, force jopt-simple to be exactly 5.0.4 because Mojang ships that version, but some transitive dependencies request 6.0+ 
+    implementation('net.sf.jopt-simple:jopt-simple:5.0.4') { version { strictly '5.0.4' } }
+
     // Apply Mixin AP
     annotationProcessor "org.spongepowered:mixin:${project.mixin_version}:processor"
+
+    // MixinExtra
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.4.1"))
+    implementation(jarJar("io.github.llamalad7:mixinextras-forge:0.4.1")) {
+        jarJar.ranged(it, "[0.4.1,)")
+    }
 
     // Netty's http and websocket support
     minecraftLibrary(group: 'io.netty', name: 'netty-codec-http', version: project.netty_version) {
@@ -188,6 +187,23 @@ tasks.named('processResources', ProcessResources).configure {
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+eclipse {
+	// Run everytime eclipse builds the code
+	//autoBuildTasks genEclipseRuns
+	// Run when importing the project
+	synchronizationTasks 'genEclipseRuns'
+}
+
+// Merge the resources and classes into the same directory. 
+// This is done because java expects modules to be in a single directory.
+// And if we have it in multiple we have to do performance intensive hacks like having the UnionFileSystem
+// This will eventually be migrated to ForgeGradle so modders don't need to manually do it. But that is later.
+sourceSets.each {
+	def dir = layout.buildDirectory.dir("sourcesSets/$it.name")
+	it.output.resourcesDir = dir
+	it.java.destinationDirectory = dir
 }
 
 jarJar.enable()
